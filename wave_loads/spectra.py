@@ -6,6 +6,8 @@ The spectrum is one-sided, so the area under it is m0 = Hs^2 / 16.
 References:
 - Sørensen, Marine Control Systems, section 6.2.1
 """
+import math
+
 import numpy as np
 
 
@@ -22,7 +24,6 @@ def pierson_moskowitz(omega, hs, tp):
     w = omega[pos]
     S[pos] = 5.0 / 16.0 * hs**2 * wp**4 / w**5 * np.exp(-1.25 * (wp / w) ** 4)
     return S
-
 
 
 def jonswap(omega, hs, tp, gamma):
@@ -42,3 +43,25 @@ def jonswap(omega, hs, tp, gamma):
     peak = gamma ** r                                       # peak enhancement factor
     normalisation = 1.0 - 0.287 * np.log(gamma)
     return normalisation * pierson_moskowitz(omega, hs, tp) * peak
+
+
+
+def cos2s(dtheta, s):
+    """Cos-2s directional spreading function D(theta - theta0) [1/rad].
+
+    D = C(s) * cos(dtheta)^(2s) for |dtheta| < pi/2, otherwise 0.
+    C(s) = Gamma(s + 1) / (sqrt(pi) * Gamma(s + 1/2)) makes the integral
+    over all directions equal to 1, so no energy is added or lost.
+
+    dtheta: angle from the mean wave direction [rad]
+    s:      spreading exponent. 1 (ITTC) or 2 (ISSC). Higher = narrower.
+
+    References: Sørensen, Marine Control Systems, eq. 6.22
+    """
+    if s <= 0:
+        raise ValueError(f"Spreading exponent s must be positive, got {s}")
+    dtheta = np.asarray(dtheta, dtype=float)
+    dtheta = (dtheta + np.pi) % (2.0 * np.pi) - np.pi      # wrap the angle to (-pi, pi]
+    c = math.exp(math.lgamma(s + 1.0) - math.lgamma(s + 0.5)) / math.sqrt(math.pi)
+    D = c * np.cos(dtheta) ** (2.0 * s)
+    return np.where(np.abs(dtheta) < np.pi / 2, D, 0.0)    # no waves from behind
