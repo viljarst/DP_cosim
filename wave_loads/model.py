@@ -20,6 +20,7 @@ Output: forces in the body frame [Fx (N), Fy (N), Mz (Nm)].
 import numpy as np
 
 from sea_state import SeaState, realize
+from vessel_data import VesselData
 
 
 def calm_sea():
@@ -119,3 +120,33 @@ class WaveLoadModel:
     def loads(self, t, eta):
         """Returns (first_order, drift) at time t for vessel position eta."""
         return self.first_order(t, eta), self.drift(t, eta)
+
+    
+
+def build_model(p):
+    """Build a WaveLoadModel from a flat parameter list (dict).
+
+    p has the same names as get_waveloads_parameters() in waveloads_config.py.
+    Used by the FMU and by the test scripts, so the model is always built the same way.
+    """
+    vessel = VesselData(
+        p["vessel_data_file"], int(p["speed_index"]),
+        force_rao_rows={"surge": int(p["force_rao_row_surge"]),
+                        "sway": int(p["force_rao_row_sway"]),
+                        "yaw": int(p["force_rao_row_yaw"])},
+        drift_rows={"surge": int(p["drift_row_surge"]),
+                    "sway": int(p["drift_row_sway"]),
+                    "yaw": int(p["drift_row_yaw"])},
+        rao_amplitude=p["rao_amplitude"],
+    )
+    sea_settings = {
+        "spectrum_type": p["spectrum_type"], "gamma": float(p["gamma"]),
+        "spreading_type": p["spreading_type"], "s": float(p["spreading_s"]),
+        "n_directions": int(p["n_directions"]), "direction_limit_deg": float(p["direction_limit_deg"]),
+        "n_frequencies": int(p["n_frequencies"]),
+        "omega_min_factor": float(p["omega_min_factor"]), "omega_max_factor": float(p["omega_max_factor"]),
+        "random_frequencies": bool(p["random_frequencies"]), "random_directions": bool(p["random_directions"]),
+        "seed": int(p["seed"]),
+    }
+    return WaveLoadModel(vessel, sea_settings, float(p["gravity"]), bool(p["direction_is_from"]))
+
