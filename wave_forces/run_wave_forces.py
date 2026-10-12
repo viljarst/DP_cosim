@@ -1,33 +1,42 @@
-"""Run the whole wave load model for one sea state and plot the results.
+"""Run the whole chain for one sea state and plot the wave loads.
 
-Run from the repo folder:  python wave_loads/run_wave_loads.py
+Run from the repo folder:  python wave_forces/run_wave_forces.py
 
+waves block (wave components) -> force model (this folder) -> loads.
 The vessel is held still at the origin (no vessel model yet), so this shows
 the wave loads that a DP system would have to deal with.
 """
+import forces_config  # noqa: F401  (must be first: makes Config/ and wave_loads/ importable)
+
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from forces_config import get_wave_forces_parameters
 from model import build_model
-from sea_state import elevation
+from sea_state import directions_to, elevation, sea_from_parameters
 from waveloads_config import get_waveloads_parameters
 
-from enviroment_config import WAVE    # found because waveloads_config added Config/ to the path
+from enviroment_config import WAVE    # found because forces_config added Config/ to the path
 
 # -- Settings for this run -----------------------------------------------------------
 DURATION = 3 * 3600.0                 # [s] three hours, as in a DP analysis
 DT = 0.5                              # [s] time step
 HEADING_DEG = 0.0                     # vessel heading, 0 = north
 
-# -- Build the model from config and set the sea state ------------------------------
-model = build_model(get_waveloads_parameters())
-model.set_sea_state(WAVE.hs, WAVE.tp, np.radians(WAVE.direction_deg))
+# -- The waves block: make the wave components from config --------------------------
+wave_parameters = get_waveloads_parameters()
+sea, kept = sea_from_parameters(WAVE.hs, WAVE.tp, wave_parameters)
+directions = directions_to(sea, WAVE.direction_deg, wave_parameters["direction_is_from"])
+
+# -- The vessel block: build the force model and give it the wave components --------
+model = build_model(get_wave_forces_parameters())
+model.set_waves(sea.amplitudes, sea.frequencies, sea.phases, directions)
 eta = np.array([0.0, 0.0, np.radians(HEADING_DEG)])   # north, east, heading
 
 print(f"Sea state: Hs = {WAVE.hs} m, Tp = {WAVE.tp} s, waves from {WAVE.direction_deg} deg")
-print(f"Vessel heading: {HEADING_DEG} deg,  {len(model.sea.amplitudes)} wave components")
+print(f"Vessel heading: {HEADING_DEG} deg,  {len(sea.amplitudes)} wave components ({kept:.1%} of the wave energy)")
 print(f"Running {DURATION / 3600:.0f} hours with dt = {DT} s ...")
 
 # -- Time loop (this is what do_step in the FMU will do, one step at a time) -------
@@ -36,7 +45,7 @@ first = np.zeros((len(t), 3))
 drift = np.zeros((len(t), 3))
 for i, ti in enumerate(t):
     first[i], drift[i] = model.loads(ti, eta)
-zeta = elevation(t, model.sea)        # wave elevation at the vessel
+zeta = elevation(t, sea)              # wave elevation at the vessel
 
 # -- Statistics ------------------------------------------------------------------------
 mean_drift = model.mean_drift(eta[2])
@@ -80,7 +89,7 @@ axes[-1, 0].set_xlabel("Time [min]")
 axes[-1, 1].set_xlabel("Time [min]")
 fig.tight_layout()
 
-out = Path(__file__).resolve().parent / "results" / "wave_loads_test.png"
+out = Path(__file__).resolve().parent / "results" / "wave_forces_test.png"
 out.parent.mkdir(exist_ok=True)
 fig.savefig(out, dpi=120)
 print(f"\nPlot saved to {out}")

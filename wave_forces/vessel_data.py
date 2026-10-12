@@ -120,3 +120,4 @@ class VesselData:
         w = (beta - h_ext[lo]) / (h_ext[lo + 1] - h_ext[lo])
         hi = (lo + 1) % nh                                                     # index after the last is the first
         return lo, hi, w
+    

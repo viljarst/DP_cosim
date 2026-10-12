@@ -1,4 +1,4 @@
-"""Look inside the vessel data file. Run from the repo folder:  python wave_loads/explore_vessel_data.py
+"""Look inside the vessel data file. Run from the repo folder:  python wave_forces/explore_vessel_data.py
 
 Nothing here is used by the model. It is only for understanding the data.
 """
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-# The data file lives in vessels/gunnerus/, one folder up from wave_loads/
+# The data file lives in vessels/gunnerus/, one folder up from wave_forces/
 data_file = Path(__file__).resolve().parent.parent / "vessels" / "gunnerus" / "gunnerus_vessel.json"
 
 with open(data_file, "r", encoding="utf-8") as f:

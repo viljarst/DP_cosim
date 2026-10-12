@@ -1,8 +1,11 @@
-# Wave loads
+# Waves
 
-Wave loads on the vessel for the DP simulator: **first-order (wave-frequency)
-loads** and **mean + slowly varying drift loads**, in long-crested or
-short-crested irregular sea. Packaged as an FMU (`WaveLoads.fmu`) for OSP.
+The waves block for the DP simulator. It describes a **long-crested or
+short-crested irregular sea** as a set of regular wave components, and sends
+them to the vessel block. Packaged as an FMU (`WaveLoads.fmu`) for OSP.
+
+The block does **not** calculate any forces. The forces on the vessel are
+calculated in the vessel block from the wave components, see `../wave_forces/`.
 
 Based on the TMR4240 / `mcsimpy` wave model, extended with directional
 spreading (Sørensen, *Marine Control Systems*, section 6.2.1).
@@ -18,75 +21,93 @@ spreading (Sørensen, *Marine Control Systems*, section 6.2.1).
 | `hs` | m | environment | Significant wave height |
 | `tp` | s | environment | Peak period |
 | `wave_direction_deg` | deg | environment | Mean wave direction, where the waves come **from**, 0 = north, clockwise |
-| `north` | m | vessel model | Vessel position north (NED) |
-| `east` | m | vessel model | Vessel position east (NED) |
-| `heading` | **rad** | vessel model | Vessel heading ψ, 0 = north, clockwise |
 
-### Outputs (body frame)
+### Outputs
+
+Four numbers per wave component, for `i = 0, 1, ..., N_WAVES - 1`
+(`N_WAVES` from `Config/wave_config.py`, now 100, so 400 outputs).
+Component 0 has the most energy.
 
 | Name | Unit | Description |
 |---|---|---|
-| `X`, `Y`, `N` | N, N, Nm | **Total** wave load = first order + drift |
-| `X_first`, `Y_first`, `N_first` | N, N, Nm | First-order (wave-frequency) part only |
-| `X_drift`, `Y_drift`, `N_drift` | N, N, Nm | Drift (mean + slowly varying) part only |
+| `amplitude_i` | m | Wave amplitude (half the wave height) |
+| `omega_i` | rad/s | Wave frequency |
+| `phase_i` | rad | Phase |
+| `direction_i` | **rad** | Direction the wave travels **to**, NED, 0 = north, clockwise |
+| `kept_energy_fraction` | – | Share of the total wave energy in the components sent out (for logging) |
 
-Body frame: x forward, y to starboard, N positive bow to starboard.
+**The vessel block must use exactly this wave elevation** (same sign, cos and
+time `t` as the simulation time):
+
+```
+zeta(x, y, t) = sum_i amplitude_i * cos(omega_i * t - k_i * (x cos(direction_i) + y sin(direction_i)) - phase_i)
+k_i = omega_i^2 / g      (deep water)
+```
+
+where `x` is north and `y` is east. The components only change when `hs` or
+`tp` changes (then the sea is built again) or when `wave_direction_deg`
+changes (then all directions turn).
 
 ### Parameters (set once, before the simulation starts)
 
-24 parameters, set by the cosimulation master from
+15 parameters, set by the cosimulation master from
 `waveloads_config.get_waveloads_parameters()`. The FMU does **not** read the
 config files itself, and refuses to run unless `configuration_loaded = 1`.
 
 | Type | Parameters |
 |---|---|
-| Real | `configuration_loaded`, `gravity`, `gamma`, `spreading_s`, `direction_limit_deg`, `omega_min_factor`, `omega_max_factor` |
-| Integer | `speed_index`, `force_rao_row_surge/sway/yaw`, `drift_row_surge/sway/yaw`, `n_directions`, `n_frequencies`, `seed` |
+| Real | `configuration_loaded`, `gamma`, `spreading_s`, `direction_limit_deg`, `omega_min_factor`, `omega_max_factor` |
+| Integer | `n_directions`, `n_frequencies`, `seed`, `n_waves` |
 | Boolean | `direction_is_from`, `random_frequencies`, `random_directions` |
-| String | `vessel_data_file`, `rao_amplitude`, `spectrum_type`, `spreading_type` |
+| String | `spectrum_type`, `spreading_type` |
 
 > **Important for the master script:** each parameter must be set with the
 > function for its FMI type (`real_initial_value`, `integer_initial_value`,
 > `boolean_initial_value`, `string_initial_value` in libcosimpy). A value set
 > with the wrong type is silently ignored by OSP.
 
+### `N_WAVES` is special
+
+An FMU has a fixed number of outputs, decided when it is **built**. So the
+FMU reads `N_WAVES` from `Config/wave_config.py` when it is built (the file is
+copied into the FMU). After changing `N_WAVES`:
+
+1. rebuild the FMU,
+2. redo the connections in `OspSystemStructure.xml` (4 per wave component).
+
+If the config and the FMU do not agree, the FMU stops at the start of the
+simulation with a message saying so.
+
 ---
 
 ## How it works
 
 ```
-Hs, Tp, direction
-      ↓  spectra.py + sea_state.py
-N x M regular wave components (amplitude, frequency, direction, phase)
-      ↓  vessel_data.py
-force RAO and drift coefficient for each component (from the ShipX table)
-      ↓  model.py
-first-order loads + drift loads (Newman's approximation)
-      ↓
-X, Y, N
+Hs, Tp
+   ↓  spectra.py + sea_state.py: realize()
+N_FREQUENCIES x N_DIRECTIONS wave components
+   ↓  sea_state.py: keep_strongest()
+the N_WAVES components with the most energy (Sørensen 6.2.1, method 1)
+   ↓  sea_state.py: directions_to()   (+ mean wave direction)
+amplitude, omega, phase, direction  ->  outputs
 ```
 
-The hydrodynamic table only describes the response to **one regular wave**
-(per metre amplitude). The block splits the irregular sea into many regular
-waves, looks each one up in the table and adds the contributions together.
+The amplitudes are **not** scaled up after the weakest components are
+removed, so Hs of the components sent out is a little lower than the input
+Hs. `kept_energy_fraction` says how much of the energy is kept.
 
 ## Files
 
 | File | What it does |
 |---|---|
 | `spectra.py` | Wave spectra (Pierson–Moskowitz, JONSWAP) and the cos-2s spreading function |
-| `sea_state.py` | Splits the spectrum into wave components |
-| `vessel_data.py` | Reads the vessel file and interpolates RAOs / drift coefficients in frequency and heading |
-| `model.py` | Calculates the loads. `build_model(p)` builds the model from the parameter list |
+| `sea_state.py` | Splits the spectrum into wave components, keeps the strongest, adds the mean direction |
 | `waveloads_fmu.py` | The FMU shell: inputs, parameters, outputs, `do_step` |
-| `waveloads_config.py` | Reads `Config/` and returns the parameter list for the FMU |
-| `check_*.py` | Test scripts, one per file |
-| `explore_vessel_data.py` | Prints what is in the vessel data file |
-| `run_waveloads.py` | Runs the whole model for 3 hours and plots the loads |
+| `waveloads_config.py` | Reads `Config/wave_config.py` and returns the parameter list for the FMU |
+| `check_*.py` | Check scripts, one per file |
 
 Settings are in `Config/wave_config.py` (spectrum, spreading, discretization,
-vessel data file). Hs, Tp and direction are in `Config/enviroment_config.py`.
-Vessel data is in `vessels/<vessel>/`.
+`N_WAVES`). Hs, Tp and direction are in `Config/enviroment_config.py`.
 
 ---
 
@@ -95,54 +116,41 @@ Vessel data is in `vessels/<vessel>/`.
 From the repo folder, with the `dpcosim` environment active:
 
 ```
-python -m pythonfmu build -f wave_loads/waveloads_fmu.py -d wave_loads/build wave_loads/model.py wave_loads/sea_state.py wave_loads/spectra.py wave_loads/vessel_data.py
+python -m pythonfmu build -f wave_loads/waveloads_fmu.py -d wave_loads/build wave_loads/sea_state.py wave_loads/spectra.py Config/wave_config.py
 ```
 
 The FMU is written to `wave_loads/build/WaveLoads.fmu` (not in git). Rebuild
-after every change to the `.py` files.
+after every change to the `.py` files, and after changing `N_WAVES`.
 
 **Requirements to run the FMU:**
 - Windows or Linux. pythonfmu only includes `win64` and `linux64` binaries,
   so the FMU can be **built** on Mac but not **run** there.
 - Python 3.11+ with `numpy` installed on the machine that runs the simulation.
 
-## Test
+## Check
 
 Run from the repo folder. All of these work on Mac.
 
 ```
 python wave_loads/check_spectra.py          # Hs from spectrum area, peak position
-python wave_loads/check_sea_state.py        # Hs, spreading, no repetition of wave groups
-python wave_loads/check_vessel_data.py      # interpolation, physics of the drift table
-python wave_loads/check_model.py            # drift points downwave, mirror symmetry
-python wave_loads/check_waveloads_config.py # parameters from config build a model
-python wave_loads/check_waveloads_fmu.py    # FMU code gives the same loads as the model
-python wave_loads/run_waveloads.py          # 3-hour run with plots
+python wave_loads/check_sea_state.py        # Hs, spreading, repetition, strongest components, directions
+python wave_loads/check_waveloads_config.py # parameters from config build the sea
+python wave_loads/check_waveloads_fmu.py    # FMU outputs, new direction, calm sea, wrong N_WAVES
 ```
-
-
-## Recommended time step
-
-The first-order loads vary with the wave period (5–10 s), so use a time step
-of **0.5 s or less**.
 
 ---
 
 ## Known limitations
 
 - Deep water (k = ω²/g).
-- Zero vessel speed (DP).
-- Drift between components uses Newman's approximation, not full QTFs.
 - The spreading function depends only on direction, not on frequency.
-- The vessel file must cover 0–360° in heading (no automatic mirroring).
-- No interaction between waves and current.
+- A change in Tp during the simulation moves all frequencies, which gives a jump in the wave elevation.
+- Keeping only the strongest components removes the short waves first. For a
+  small vessel like Gunnerus these give much of the drift, so the drift is
+  underestimated (see `wave_forces/check_model.py`).
 
 ## Open points
 
-- [ ] Agree units with the vessel model: `heading` is in **radians**, `wave_direction_deg` in **degrees**.
-- [ ] Agree which output the vessel model uses: total (`X, Y, N`) or drift only.
-- [ ] Use the same vessel for all blocks. Now: wind uses the 88 m OSV in `vessel_config.py`, waves use Gunnerus.
-- [ ] Ulstein data: write a converter to the JSON format in `vessels/`, and keep the data out of git (`vessels/ulstein/` in `.gitignore`).
+- [ ] How to handle the energy that is removed (scale the amplitudes up, or not) – asked Dong.
+- [ ] Agree with the vessel block: `direction_i` is where the wave goes **to**, in **radians**.
 - [ ] Move the settings in `Config/wave_config.py` into the shared config structure.
-
-

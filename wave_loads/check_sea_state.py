@@ -1,7 +1,7 @@
 """Quick check of sea_state.py. Run from the repo folder:  python wave_loads/check_sea_state.py"""
 import numpy as np
 
-from sea_state import elevation, realize
+from sea_state import directions_to, elevation, keep_strongest, realize
 from spectra import cos2s
 
 hs = 3.0     # significant wave height [m]
@@ -61,3 +61,23 @@ try:
     realize(hs, tp, "jonswap", 3.3, "cos-2s", 2, 11, 90, 30, 0.25, 3.0, True, True, seed=123)
 except ValueError as error:
     print(f"  {error}")
+
+print("CHECK KEEP THE STRONGEST COMPONENTS:")
+sea = make_sea("cos2s")                                   # 30 x 11 = 330 components
+for n_waves in (100, 330, 400):
+    strongest, kept = keep_strongest(sea, n_waves)
+    energy = 0.5 * strongest.amplitudes**2
+    print(f"  n_waves = {n_waves}:  {len(strongest.amplitudes)} components sent out, "
+          f"{np.count_nonzero(strongest.amplitudes)} with waves,  kept energy = {kept:.1%},  "
+          f"Hs = {4 * np.sqrt(energy.sum()):.2f} m (full sea: {hs} m)")
+strongest, _ = keep_strongest(sea, 100)
+energy = 0.5 * strongest.amplitudes**2
+print(f"  Sorted, strongest first: {bool(np.all(np.diff(energy) <= 0))}")
+print(f"  Weakest kept is stronger than strongest removed: "
+      f"{energy[-1] >= np.sort(0.5 * sea.amplitudes**2)[::-1][100]}")
+
+print("CHECK DIRECTIONS SENT OUT:")
+long_crested, _ = keep_strongest(make_sea("none"), 5)
+for from_deg in (0.0, 45.0, 270.0):
+    to_deg = np.degrees(directions_to(long_crested, from_deg, direction_is_from=True)[0])
+    print(f"  Waves from {from_deg:5.1f} deg travel to {to_deg:5.1f} deg  (should be {(from_deg + 180) % 360:5.1f})")

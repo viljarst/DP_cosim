@@ -1,20 +1,16 @@
 """
-Settings for the wave load block (wave_loads/).
+Settings for the waves block (wave_loads/).
 
 TEMPORARY FILE: kept separate for now. When we align the config with the
 rest of the group, each section below moves to the file named in its header.
 
 Hs, Tp and wave direction are NOT here: they change during the simulation
 and come from the environment (see enviroment_config.py).
-"""
 
-# -- Vessel hydrodynamic data  (later -> vessel_config.py) ------------------------
-VESSEL_DATA_FILE = "vessels/gunnerus/gunnerus_vessel.json"  # relative to the repo folder
-SPEED_INDEX = 0                                    # column in the speed table, 0 = zero speed (DP)
-# Which table row is which DOF. Check this for every new vessel file!
-FORCE_RAO_ROWS = {"surge": 0, "sway": 1, "yaw": 5}
-DRIFT_ROWS = {"surge": 0, "sway": 1, "yaw": 2}     # Gunnerus: yaw drift is in row 2 (MSS layout)
-RAO_AMPLITUDE = "absolute"                         # "absolute" (as mcsimpy) or "signed"
+The waves block only describes the sea. It does not know anything about the
+vessel. The settings for calculating the forces on the vessel are in
+wave_forces_config.py.
+"""
 
 # -- Direction convention  (later -> not needed) ------------------------------------
 # classes.py already says Wave.direction_deg is "where the waves come from",
@@ -37,3 +33,11 @@ RANDOM_FREQUENCIES = True                          # random frequency inside eac
 RANDOM_DIRECTIONS = True                           # random direction inside each bin
 SEED = 123                                         # same seed = same sea
 
+# Number of wave components the waves block sends out: the N_WAVES components
+# with the most energy (Sørensen section 6.2.1, method 1). If the grid has fewer
+# components (N_FREQUENCIES x N_DIRECTIONS), the rest are sent with amplitude 0.
+#
+# NB: N_WAVES decides how many outputs the FMU has (4 per wave). After changing
+# it you must REBUILD the FMU and redo the connections in OspSystemStructure.xml.
+# The FMU stops with an error message if it was built with another N_WAVES.
+N_WAVES = 100

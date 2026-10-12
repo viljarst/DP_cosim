@@ -8,8 +8,12 @@ Short-crested sea: the energy is spread over several directions around the
                    mean direction (spreading "cos2s").
 
 The directions are stored RELATIVE to the mean direction (direction_offsets).
-The mean direction itself is added later, when the loads are calculated, so
-the environment block can change it without building a new sea.
+The mean direction itself is added last, in directions_to(), so the
+environment block can change it without building a new sea.
+
+The waves block sends out a fixed number of components (n_waves): the ones
+with the most energy (keep_strongest). This is what sea_from_parameters()
+does, and both the FMU and the check scripts use that function.
 
 References:
 - Sørensen, Marine Control Systems, section 6.2.1 (eq. 6.1, 6.6, 6.22)
@@ -117,3 +121,70 @@ def elevation(t, sea):
     """
     t = np.atleast_1d(np.asarray(t, dtype=float))[:, None]  # column, so each row is one time
     return np.sum(sea.amplitudes * np.cos(sea.frequencies * t - sea.phases), axis=1)
+
+
+# -- What the waves block sends out ----------------------------------------------------
+
+def calm_sea(n_waves):
+    """A sea with n_waves components that all have amplitude 0 (no waves)."""
+    zeros = np.zeros(n_waves)
+    return SeaState(zeros, zeros.copy(), zeros.copy(), zeros.copy())
+
+
+def keep_strongest(sea, n_waves):
+    """Keep the n_waves components with the most energy (Sørensen section 6.2.1, method 1).
+
+    Returns (sea, kept_energy_fraction):
+      sea:                  exactly n_waves components, strongest first. If the
+                            sea has fewer components, the rest get amplitude 0.
+      kept_energy_fraction: share of the total energy that was kept (1.0 = all).
+                            The amplitudes are NOT scaled up, so Hs of the kept
+                            components is sqrt(kept_energy_fraction) * Hs.
+    """
+    energy = 0.5 * sea.amplitudes**2                        # energy of each component
+    order = np.argsort(-energy, kind="stable")[:n_waves]    # index of the strongest, largest first
+    kept_energy_fraction = float(energy[order].sum() / energy.sum())
+
+    strongest = calm_sea(n_waves)                           # start with n_waves empty slots ...
+    n = len(order)                                          # ... and fill the first n of them
+    strongest.amplitudes[:n] = sea.amplitudes[order]
+    strongest.frequencies[:n] = sea.frequencies[order]
+    strongest.phases[:n] = sea.phases[order]
+    strongest.direction_offsets[:n] = sea.direction_offsets[order]
+    return strongest, kept_energy_fraction
+
+
+def sea_from_parameters(hs, tp, p):
+    """Build the sea exactly as the waves FMU does.
+
+    p is the parameter list from waveloads_config.get_waveloads_parameters().
+    Splits the spectrum into n_frequencies x n_directions components and keeps
+    the n_waves strongest. Hs <= 0 or Tp <= 0 gives a calm sea.
+
+    Returns (sea, kept_energy_fraction), see keep_strongest().
+    """
+    n_waves = int(p["n_waves"])
+    if hs <= 0.0 or tp <= 0.0:
+        return calm_sea(n_waves), 1.0
+    sea = realize(hs, tp,
+                  spectrum_type=p["spectrum_type"], gamma=float(p["gamma"]),
+                  spreading_type=p["spreading_type"], s=float(p["spreading_s"]),
+                  n_directions=int(p["n_directions"]), direction_limit_deg=float(p["direction_limit_deg"]),
+                  n_frequencies=int(p["n_frequencies"]),
+                  omega_min_factor=float(p["omega_min_factor"]), omega_max_factor=float(p["omega_max_factor"]),
+                  random_frequencies=bool(p["random_frequencies"]),
+                  random_directions=bool(p["random_directions"]),
+                  seed=int(p["seed"]))
+    return keep_strongest(sea, n_waves)
+
+
+def directions_to(sea, wave_direction_deg, direction_is_from):
+    """The direction each component travels TO [rad, NED, 0 = north, between 0 and 2*pi].
+
+    wave_direction_deg: mean wave direction from the environment block [deg]
+    direction_is_from:  True if wave_direction_deg is where the waves come FROM
+    """
+    mean = np.radians(wave_direction_deg)
+    if direction_is_from:
+        mean = mean + np.pi                                 # coming from north = going to south
+    return (mean + sea.direction_offsets) % (2.0 * np.pi)

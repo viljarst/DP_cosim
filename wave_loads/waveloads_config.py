@@ -1,4 +1,4 @@
-"""Build the FMI parameter values for the WaveLoads FMU from the project config.
+"""Build the FMI parameter values for the waves FMU from the project config.
 
 Same idea as Olve's windloads_config.py: the FMU does not read the config
 files itself. This file reads them and returns a list of names and values
@@ -10,27 +10,15 @@ from pathlib import Path
 REPO_DIR = Path(__file__).resolve().parent.parent      # the DP_cosim folder
 sys.path.insert(0, str(REPO_DIR / "Config"))           # so Python can find the files in Config/
 
-import standard      # noqa: E402  (must come after the line above)
-import wave_config   # noqa: E402
+import wave_config   # noqa: E402  (must come after the line above)
 
 
 def get_waveloads_parameters() -> dict:
-    """Return names and values to set on the WaveLoads FMU before initialization."""
+    """Return names and values to set on the waves FMU before initialization."""
     c = wave_config
     return {
         "configuration_loaded": 1.0,
-        # vessel data
-        "vessel_data_file": str(REPO_DIR / c.VESSEL_DATA_FILE),   # full path, so the FMU can find it
-        "speed_index": c.SPEED_INDEX,
-        "force_rao_row_surge": c.FORCE_RAO_ROWS["surge"],
-        "force_rao_row_sway": c.FORCE_RAO_ROWS["sway"],
-        "force_rao_row_yaw": c.FORCE_RAO_ROWS["yaw"],
-        "drift_row_surge": c.DRIFT_ROWS["surge"],
-        "drift_row_sway": c.DRIFT_ROWS["sway"],
-        "drift_row_yaw": c.DRIFT_ROWS["yaw"],
-        "rao_amplitude": c.RAO_AMPLITUDE,
-        # physics and conventions
-        "gravity": standard.G,
+        # conventions
         "direction_is_from": c.DIRECTION_IS_FROM,
         # spectrum and spreading
         "spectrum_type": c.SPECTRUM_TYPE,
@@ -46,4 +34,6 @@ def get_waveloads_parameters() -> dict:
         "random_frequencies": c.RANDOM_FREQUENCIES,
         "random_directions": c.RANDOM_DIRECTIONS,
         "seed": c.SEED,
+        # number of wave components sent out (must match the number the FMU was built with)
+        "n_waves": c.N_WAVES,
     }

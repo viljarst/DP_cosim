@@ -1,4 +1,4 @@
-"""Quick check of vessel_data.py. Run from the repo folder:  python wave_loads/check_vessel_data.py"""
+"""Quick check of vessel_data.py. Run from the repo folder:  python wave_forces/check_vessel_data.py"""
 from pathlib import Path
 
 import numpy as np
